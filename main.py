@@ -1,6 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime
+from cryptography.fernet import Fernet
+from pydantic import BaseModel
+import random
+import sqlite3
+
 app = FastAPI()
+
 # Configure CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -9,256 +16,181 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
-import uuid
-import random
-from datetime import datetime
-from cryptography.fernet import Fernet
-# Generate a key
-# key = Fernet.generate_key()
-key=b'B8rPRkgG8ZuBIEIX5z-Auu9qB59jvFdVkJOIXbdlZ6I='
-cipher = Fernet(key)
-print("he")
 
-'''********************************************************************
-                    database connection and set up
-'''
-import psycopg2
-try:
-    connection = psycopg2.connect(
-        user="smpg_user",
-        password="2Xdoq5FaqitBiCbvl1A7FTubpPBeiONw",
-        host="dpg-cnv79bla73kc73c7fokg-a",
-        port=5432,
-        database="smpg"
-    )
-    print("database connected successfully")
-    cur = connection.cursor()
-except (Exception, psycopg2.Error) as error:
-    print("Error while connecting to PostgreSQL:", error)
-cur.execute(
-    '''
-    create table if not exists credentials(
-        phone varchar(10),
-        username varchar(20),
-        password varchar(10),
-        createdOn timestamp
-    )
-    '''
-)
-cur.execute(
-    '''create table if not exists properties
-        (
-         pid varchar(6),
-         username varchar(20),
-         phone varchar(10),
-         address varchar(200),
-         pincode integer,
-         noOfPeopleToAccomodate integer,
-         rentPerPerson integer,
-         areaInSqft float,
-         wifiFacility varchar(200),
-         furnished varchar(200),
-         url1 varchar(500),
-         url2 varchar(500),
-         url3 varchar(500),
-         description varchar(200),
-         postedOn timestamp
-        )'''
-)
+# Generate a key
+key = b'B8rPRkgG8ZuBIEIX5z-Auu9qB59jvFdVkJOIXbdlZ6I='
+cipher = Fernet(key)
+
+# Establish database connection and set up tables
+connection = sqlite3.connect('example.db')
+cur = connection.cursor()
+
 cur.execute('''
-    create table if not exists transactions(
-        atTime timestamp,
-        phone varchar(10),
-        description varchar(30)
+    CREATE TABLE IF NOT EXISTS credentials (
+        phone VARCHAR(10),
+        username VARCHAR(20),
+        password VARCHAR(10),
+        createdOn VARCHAR(200)
     )
 ''')
+
+cur.execute('''
+    CREATE TABLE IF NOT EXISTS properties (
+        pid VARCHAR(6),
+        username VARCHAR(20),
+        phone VARCHAR(10),
+        address VARCHAR(200),
+        pincode INTEGER,
+        noOfPeopleToAccomodate INTEGER,
+        rentPerPerson INTEGER,
+        areaInSqft FLOAT,
+        wifiFacility VARCHAR(200),
+        furnished VARCHAR(200),
+        url1 VARCHAR(500),
+        url2 VARCHAR(500),
+        url3 VARCHAR(500),
+        description VARCHAR(200),
+        postedOn VARCHAR(200)
+    )
+''')
+
+cur.execute('''
+    CREATE TABLE IF NOT EXISTS transactions (
+        atTime VARCHAR(200),
+        phone VARCHAR(10),
+        description VARCHAR(30)
+    )
+''')
+
 connection.commit()
-'''*********************************************************************'''
 
 
+# Request models
+class SigninSignup(BaseModel):
+    phone: str
+    username: str
+    password: str
 
-'''request models are given below'''
-from pydantic import BaseModel
-class signinsignup(BaseModel):
-    phone:str
-    username:str
-    password:str
 
 class Property(BaseModel):
-    username:str
-    phone:str
-    address:str
-    pincode:int
-    noOfPeopleToAccomodate:int
-    rentPerPerson:int
-    areaInSqft:float
-    wifiFacility:str
-    furnished:str
-    url1:str
-    url2:str
-    url3:str
-    description:str
+    username: str
+    phone: str
+    address: str
+    pincode: int
+    noOfPeopleToAccommodate: int
+    rentPerPerson: int
+    areaInSqft: float
+    wifiFacility: str
+    furnished: str
+    url1: str
+    url2: str
+    url3: str
+    description: str
 
 
-
-
-
-
-
-'''*********************************************************
-    below given are authentication and token generation 
-        validation , signin signup routes
-*********************************************************'''
-
+# Authentication and token generation/validation
 def generate_token():
-    '''This function generates a token from currenttimestamp
-        which is sent to client frontend, and everytime client
-        has to give this token to access any of the owner routes'''
-    generationtimestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S").encode()
-    return cipher.encrypt(generationtimestamp)
+    generation_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S").encode()
+    return cipher.encrypt(generation_timestamp)
 
-def validate_token(tokenvalue):
-    ''' This function checks the validity of the token ,
-        one client can use one token on
-        one device only for 1 hour, else token will be expired 
-        and session will be inactive'''
+
+def validate_token(token_value):
     try:
-        generationtimestamp=cipher.decrypt(tokenvalue)
-        generationtimestamp=datetime.strptime(
-                                                generationtimestamp.decode(),
-                                                "%Y-%m-%d %H:%M:%S"
-                                             )
-        currenttimestamp=datetime.now()
-        diff=currenttimestamp-generationtimestamp
-        if(diff.seconds>3600):
+        generation_timestamp = cipher.decrypt(token_value)
+        generation_timestamp = datetime.strptime(generation_timestamp.decode(), "%Y-%m-%d %H:%M:%S")
+        current_timestamp = datetime.now()
+        diff = current_timestamp - generation_timestamp
+        if diff.seconds > 3600:
             return False
     except:
-            return False
+        return False
     return True
 
+
 @app.post("/signup/")
-async def signup(requ:signinsignup):
-    cur.execute(f"select * from credentials where phone='{requ.phone}'")
-    rows=cur.fetchall()
-    if(len(rows)==1):
-        return {
-            "message":"user already exists try to signin"
-        }
+async def signup(req: SigninSignup):
+    cur.execute(f"SELECT * FROM credentials WHERE phone = '{req.phone}'")
+    rows = cur.fetchall()
+    if len(rows) == 1:
+        return {"message": "User already exists. Please sign in."}
     else:
-        cur.execute("insert into credentials values (%s,%s,%s,%s)",(requ.phone,requ.username,requ.password,datetime.now()))
-        cur.execute("insert into transactions values(%s,%s,%s)",(datetime.now(),requ.phone,'signup'))
+        cur.execute(f"INSERT INTO credentials (phone, username, password, createdOn) "
+                    f"VALUES ('{req.phone}', '{req.username}', '{req.password}', '{str(datetime.now())}')")
+        cur.execute(f"INSERT INTO transactions (atTime, phone, description) "
+                    f"VALUES ('{str(datetime.now())}', '{req.phone}', 'signup')")
         connection.commit()
-        return {
-            "message":"user created"
-        }
-    
+        return {"message": "User created successfully"}
+
+
 @app.post("/signin/")
-async def signin(requ:signinsignup):
-    '''function will check wheter username exists in database'''
-    cur.execute("select * from credentials where phone=%s",(requ.phone,))
-    rows=cur.fetchall()
-    if(rows==[]):
-        return { "message" : "user does not exists pls sign up"}
+async def signin(req: SigninSignup):
+    cur.execute(f"SELECT * FROM credentials WHERE phone='{req.phone}'")
+    rows = cur.fetchall()
+    if not rows:
+        return {"message": "User does not exist. Please sign up."}
     else:
-        cur.execute("insert into transactions values(%s,%s,%s)",(datetime.now(),requ.phone,'signin'))
+        cur.execute(f"INSERT INTO transactions VALUES ('{str(datetime.now())}', '{req.phone}', 'signin')")
         connection.commit()
-        '''if exists then we return him token'''
-        return{"token":generate_token()}
+        return {"token": generate_token()}
 
 
-
-
-
-
-
-
-
-'''
-***************************************************
-    OWNER routes when he has logged in and 
-        has valid token are given below
-***************************************************
-'''
-
-'''Posting a new property'''
-
-'''
-// this is below example of what content and request
-// is put in the frontend
-
-const propertyDetails = {
-    "phone": "6674566753",
-    "username":"sdfhyyuyfth",
-    "address": "123 Main St",
-    "pincode": 412434,
-    "noOfPeopleToAccomodate": 4,
-    "rentPerPerson": 500,
-    "areaInSqft": 1000.0,
-    "wifiFacility": "Yes",
-    "furnished": "Yes",
-    "url1": "https://ashfdvjk"
-    "url2": "https://kjsdf"
-    "url3": "https://hslkdfjhiwe"
-    "description": "Spacious apartment with modern amenities"
-};
-
-// Define the token
-const token = "Uuxt6MjEFEL2VYqK0T8YybZiIWU=*hl+75Qq/xtAaUktrCXtA3Q==*6DJ4ExTU/c0J6EeH/xyEMA==*LvXtk0D8jealdGc3NU2oGg==";
-
-// Construct the request URL with the token as a URL parameter
-const url = `/postProperty/?token=${encodeURIComponent(token)}`;
-
-// Make a POST request with Fetch API
-fetch(url, {
-    method: 'POST',
-    headers: {
-        'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(propertyDetails)
-})
-.then(response => {
-    if (!response.ok) {
-        throw new Error('Network response was not ok');
-    }
-    return response.json();
-})
-'''
+# Owner routes
 @app.post("/postProperty/")
-async def postProperty(token,req:Property):
-    if((validate_token(token))==False):
-        return {"error" : "forbidden action pls signin "}
-    cur.execute(f"select count(*),username from properties where username='{req.username}' group by username")
-    rows=cur.fetchall();
+async def postProperty(token, req: Property):
+    if not validate_token(token):
+        return {"error": "Forbidden action. Please sign in."}
+
+    cur.execute(f"SELECT COUNT(*), username FROM properties WHERE username='{req.username}' GROUP BY username")
+    rows = cur.fetchall()
+
     try:
-        if(rows[0][0]==5):
-            return {"message" : "limit reached"}
-    except: pass
-    propertypid=int(random.random()*100000)
-    cur.execute("insert into properties values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (propertypid,req.phone,req.username,req.address,req.pincode,
-                 req.noOfPeopleToAccomodate,req.rentPerPerson,req.areaInSqft,
-                 req.wifiFacility,req.furnished,
-                 req.url1, req.url2, req.ur3,
-                 req.description,datetime.now())
-    )
-    cur.execute("insert into transactions values(%s,%s,%s)",(datetime.now(),req.phone,'new property posted'))
+        if rows[0][0] == 5:
+            return {"message": "Limit reached"}
+    except IndexError:
+        pass
+
+    propertypid = int(random.random() * 100000)
+    cur.execute(f"INSERT INTO properties VALUES "
+                f"('{propertypid}', '{req.phone}', '{req.username}', '{req.address}', '{req.pincode}', "
+                f"'{req.noOfPeopleToAccommodate}', '{req.rentPerPerson}', '{req.areaInSqft}', "
+                f"'{req.wifiFacility}', '{req.furnished}', '{req.url1}', '{req.url2}', '{req.url3}', "
+                f"'{req.description}', '{str(datetime.now())}')")
+    cur.execute(f"INSERT INTO transactions VALUES ('{str(datetime.now())}', '{req.phone}', 'new property posted')")
     connection.commit()
-    return{"message":"post successful"}
-'''to prevent overflow of posts by single user i.e. in a situation
- where same user puts many advertisements for same property in 
- order to get it rented more faster, to prevent this we will limit
- the number of advertisements sinlge user can put to be as 5,it is
- implemented above'''
+
+    return {"message": "Post successful"}
 
 
-
-
-'''****************************************************************
-                        VISITOR ROUTES
-****************************************************************'''
+# Visitor routes
 @app.get("/retrieveProperties/{pincode}")
-async def sendProperties(pincode:int):
-    cur.execute(f'select * from properties where pincode between {pincode-2} and {pincode+2}')
-    rows=cur.fetchall()
-    return rows
+def retrieve_properties(pincode: int):
+    try:
+        min_pincode = pincode - 2
+        max_pincode = pincode + 2
 
+        cur.execute(f"SELECT * FROM properties WHERE pincode BETWEEN {min_pincode} AND {max_pincode}")
+        rows = cur.fetchall()
+
+        return rows
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/retrieve/{phone}")
+def retrieveProperties(phone: str):
+    cur.execute(f"SELECT * FROM properties WHERE phone='{phone}'")
+    properties = cur.fetchall()
+    if not properties:
+        raise HTTPException(status_code=404, detail="Properties not found")
+    return properties
+
+
+@app.delete("/removeProperty/{property_id}")
+def removeProperty(property_id: str):
+    cur.execute(f"SELECT * FROM properties WHERE pid = '{property_id}'")
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Property not found")
+    cur.execute(f"DELETE FROM properties WHERE pid = '{property_id}'")
+    connection.commit()
+    return {"message": "Property deleted successfully"}
