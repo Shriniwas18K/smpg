@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import random
 app = FastAPI()
 # Configure CORS middleware
 app.add_middleware(
@@ -9,15 +10,13 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
-import uuid
-import random
 from datetime import datetime
 from cryptography.fernet import Fernet
 # Generate a key
 # key = Fernet.generate_key()
 key=b'B8rPRkgG8ZuBIEIX5z-Auu9qB59jvFdVkJOIXbdlZ6I='
 cipher = Fernet(key)
-print("he")
+
 
 '''********************************************************************
                     database connection and set up
@@ -25,14 +24,15 @@ print("he")
 import psycopg2
 try:
     connection = psycopg2.connect(
-        user="smpg_user",
-        password="2Xdoq5FaqitBiCbvl1A7FTubpPBeiONw",
-        host="dpg-cnv79bla73kc73c7fokg-a",
-        port=5432,
-        database="smpg"
+        user="postgres",
+        password="WtDEHOANEnCJAiHBkBanzcIUzGCkplNb",
+        host="monorail.proxy.rlwy.net",
+        port=31171,
+        database="railway"
     )
     print("database connected successfully")
-    cur = connection.cursor()
+    cur=connection.cursor()
+
 except (Exception, psycopg2.Error) as error:
     print("Error while connecting to PostgreSQL:", error)
 cur.execute(
@@ -56,11 +56,8 @@ cur.execute(
          noOfPeopleToAccomodate integer,
          rentPerPerson integer,
          areaInSqft float,
-         wifiFacility varchar(200),
-         furnished varchar(200),
-         url1 varchar(500),
-         url2 varchar(500),
-         url3 varchar(500),
+         wifiFacility varchar(3),
+         furnished varchar(3),
          description varchar(200),
          postedOn timestamp
         )'''
@@ -94,9 +91,6 @@ class Property(BaseModel):
     areaInSqft:float
     wifiFacility:str
     furnished:str
-    url1:str
-    url2:str
-    url3:str
     description:str
 
 
@@ -196,9 +190,6 @@ const propertyDetails = {
     "areaInSqft": 1000.0,
     "wifiFacility": "Yes",
     "furnished": "Yes",
-    "url1": "https://ashfdvjk"
-    "url2": "https://kjsdf"
-    "url3": "https://hslkdfjhiwe"
     "description": "Spacious apartment with modern amenities"
 };
 
@@ -234,12 +225,10 @@ async def postProperty(token,req:Property):
             return {"message" : "limit reached"}
     except: pass
     propertypid=int(random.random()*100000)
-    cur.execute("insert into properties values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+    cur.execute("insert into properties values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (propertypid,req.phone,req.username,req.address,req.pincode,
                  req.noOfPeopleToAccomodate,req.rentPerPerson,req.areaInSqft,
-                 req.wifiFacility,req.furnished,
-                 req.url1, req.url2, req.ur3,
-                 req.description,datetime.now())
+                 req.wifiFacility,req.furnished,req.description,datetime.now())
     )
     cur.execute("insert into transactions values(%s,%s,%s)",(datetime.now(),req.phone,'new property posted'))
     connection.commit()
@@ -249,6 +238,35 @@ async def postProperty(token,req:Property):
  order to get it rented more faster, to prevent this we will limit
  the number of advertisements sinlge user can put to be as 5,it is
  implemented above'''
+
+class allpropertiesreq(BaseModel):
+    username:str
+    phone:str
+@app.get('/getUserProperties/')
+async def getpropertiesofuser(token:str,req:allpropertiesreq):
+    if(validate_token(token)==False):
+        return {"message":"token expired , pls login again"}
+    cur.execute('select address,url1 from properties where username=%s and phone=%s',(req.username,req.phone))
+    rows=cur.fetchall()
+    return rows
+
+
+
+from fastapi.responses import JSONResponse
+from typing import Annotated
+import uuid,os
+from fastapi import File
+UPLOAD_DIR = "uploaded_images"
+@app.post("/uploadImage/{phn}/{unm}")
+async def create_file(token:str,file: Annotated[bytes, File()],phn,unm):
+    print(file)
+    os.makedirs(UPLOAD_DIR+f'/{phn+unm}/', exist_ok=True)
+    with open(UPLOAD_DIR+f'/{phn+unm}/'+str(uuid.uuid4())+'.png',"wb") as f:
+        f.write(file)
+    return JSONResponse(
+        content={"image_path": UPLOAD_DIR+f'/{phn+unm}/'+str(uuid.uuid4())+'.png'}
+    )
+
 
 
 
@@ -261,6 +279,5 @@ async def sendProperties(pincode:int):
     cur.execute(f'select * from properties where pincode between {pincode-2} and {pincode+2}')
     rows=cur.fetchall()
     return rows
-
 
 
